@@ -1,0 +1,106 @@
+################################################################################
+##
+## Filename: 	bkram.txt
+## {{{
+## Project:	10Gb Ethernet switch
+##
+## Purpose:	To define the interface to a generic block RAM device for the
+##		purposes of autofpga.
+##
+## Creator:	Dan Gisselquist, Ph.D.
+##		Gisselquist Technology, LLC
+##
+################################################################################
+## }}}
+## Copyright (C) 2023, Gisselquist Technology, LLC
+## {{{
+## This file is part of the ETH10G project.
+##
+## The ETH10G project contains free software and gateware, licensed under the
+## terms of the 3rd version of the GNU General Public License as published by
+## the Free Software Foundation.
+##
+## This project is distributed in the hope that it will be useful, but WITHOUT
+## ANY WARRANTY; without even the implied warranty of MERCHANTIBILITY or
+## FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+## for more details.
+##
+## You should have received a copy of the GNU General Public License along
+## with this program.  (It's in the $(ROOT)/doc directory.  Run make with no
+## target there if the PDF file isn't present.)  If not, see
+## <http://www.gnu.org/licenses/> for a copy.
+## }}}
+## License:	GPL, v3, as defined and found on www.gnu.org,
+## {{{
+##		http://www.gnu.org/licenses/gpl.html
+##
+################################################################################
+##
+## }}}
+@PREFIX=bkram
+@DEVID=BKRAM
+# @$LGMEMSZ=18
+@$LGMEMSZ=19
+@LGMEMSZ.FORMAT=%d
+@$NADDR=(1<<(@$(THIS.LGMEMSZ)))/(@$(SLAVE.BUS.WIDTH)/8)
+@$NBYTES=(1<<(@$THIS.LGMEMSZ))
+@NBYTES.FORMAT=0x%08x
+@ACCESS=@$(DEVID)_ACCESS
+@SLAVE.TYPE=MEMORY
+@SLAVE.BUS=wbwide
+@MAIN.INSERT=
+	memdev #(
+		.LGMEMSZ(@$(THIS.LGMEMSZ)),
+		.DW(@$(SLAVE.BUS.WIDTH)),
+		.EXTRACLOCK(1)
+	) @$(PREFIX)i(
+		.i_clk(@$(SLAVE.BUS.CLOCK.WIRE)),
+		.i_reset(@$(SLAVE.BUS.CLOCK.RESET)),
+		@$(SLAVE.ANSIPORTLIST)
+	);
+@REGS.N=1
+@REGS.0= 0 R_@$(DEVID) RAM
+@REGDEFS.H.DEFNS=
+#define	@$(DEVID)BASE	@$[0x%08x](REGBASE)
+#define	@$(DEVID)LEN	@$NBYTES
+@BDEF.OSDEF=_BOARD_HAS_@$(DEVID)
+@MEM.NAME= @$(PREFIX)
+@BDEF.OSVAL=extern char	_@$(MEM.NAME)[@$NBYTES];
+@LD.PERM=	wx
+@LD.NAME=	@$(MEM.NAME)
+@RTL.MAKE.GROUP= @$(DEVID)
+@RTL.MAKE.FILES= memdev.v
+@$NADDRHX = @$NADDR
+@NADDRHX.FORMAT= 0x%x
+@SIM.INCLUDE=
+#include "byteswap.h"
+@SIM.DEFINES=
+#ifndef VVAR
+#ifdef  ROOT_VERILATOR
+#include "Vmain___024root.h"
+
+#define VVAR(A) rootp->main__DOT_ ## A
+#elif	defined(NEW_VERILATOR)
+#define VVAR(A) main__DOT_ ## A
+#else
+#define VVAR(A) v__DOT_ ## A
+#endif
+#endif
+
+#define	block_ram	VVAR(_@$(PREFIX)i__DOT__mem)
+@$BUSBYTES=@$(SLAVE.BUS.WIDTH)/8
+@SIM.LOAD=
+			char	*mem;
+			start = start & (-(@$(BUSBYTES)));
+			wlen = (wlen+(@$(BUSBYTES)-1))&(-@$(BUSBYTES));
+
+			// Need to byte swap data to get it into the memory
+			//  But ... it's byte swapping at the *WORD* width, not
+			//  the 32-bit width we've built the byteswapbuf() for.
+			mem = (char *)&m_core->block_ram[start];
+			for(unsigned k=0; k<wlen; k++) {
+				unsigned	s;
+				s = (k&(-@$(BUSBYTES)))
+					|((@$(BUSBYTES)-1-k) & (@$(BUSBYTES)-1));
+				mem[s] = buf[k];
+			}

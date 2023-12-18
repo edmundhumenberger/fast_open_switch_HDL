@@ -1,0 +1,120 @@
+################################################################################
+##
+## Filename: 	netscope.txt
+## {{{
+## Project:	10Gb Ethernet switch
+##
+## Purpose:	Describes how to connect the debugging ports from all of the
+##		various network connections to a single (compressed) wishbone
+##	scope, then to be connected to the bus by autofpga.
+##
+## Creator:	Dan Gisselquist, Ph.D.
+##		Gisselquist Technology, LLC
+##
+################################################################################
+## }}}
+## Copyright (C) 2023, Gisselquist Technology, LLC
+## {{{
+## This file is part of the ETH10G project.
+##
+## The ETH10G project contains free software and gateware, licensed under the
+## terms of the 3rd version of the GNU General Public License as published by
+## the Free Software Foundation.
+##
+## This project is distributed in the hope that it will be useful, but WITHOUT
+## ANY WARRANTY; without even the implied warranty of MERCHANTIBILITY or
+## FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+## for more details.
+##
+## You should have received a copy of the GNU General Public License along
+## with this program.  (It's in the $(ROOT)/doc directory.  Run make with no
+## target there if the PDF file isn't present.)  If not, see
+## <http://www.gnu.org/licenses/> for a copy.
+## }}}
+## License:	GPL, v3, as defined and found on www.gnu.org,
+## {{{
+##		http://www.gnu.org/licenses/gpl.html
+##
+################################################################################
+##
+## }}}
+@PREFIX=netscope
+@DEVID=NETSCOPE
+@DEPENDS=ETH_ROUTER
+@TARGET=net
+@TRIGGER=@$(TARGET)_debug[31]
+@$LOG_CAPTURE_SIZE=10
+@INCLUDEFILE=wbscopc.txt
+@INT.NETSCOPE.PIC=altpic
+@INT.NETSCOPE.WIRE=@$(PREFIX)_int
+@MAIN.DEFNS=
+##
+##
+@PREFIX=netlock
+@SLAVE.BUS=wb32
+@SLAVE.TYPE=SINGLE
+@NADDR=1
+@MAIN.DEFNS=
+	reg	[3:0]	r_@$(PREFIX)_los;
+	reg	[4:0]	r_@$(PREFIX)_phy_locked;
+@MAIN.INSERT=
+	assign	@$(SLAVE.PREFIX)_stall = 1'b0;
+	assign	@$(SLAVE.PREFIX)_ack = @$(SLAVE.PREFIX)_stb;
+	assign	@$(SLAVE.PREFIX)_idata = { {(16){1'b0}},
+			{(8-NETDEVS){1'b0}}, r_@$(PREFIX)_los,
+			{(8-NETDEVS-1){1'b0}}, r_@$(PREFIX)_phy_locked };
+
+	always @(posedge i_clk)
+	begin
+		r_@$(PREFIX)_los        <= i_gnet_los;
+		r_@$(PREFIX)_phy_locked <= i_gnet_phy_locked;
+	end
+@REGS.N=1
+@REGS.0=0 R_NETLOCK NETLOCK
+@XDC.INSERT=
+set_max_delay -datapath_only -from [get_cells -hier -filter {NAME=~ u_gnet_gtx_phy/GEN_GTX*.u_xgtx*}] -to [get_cells -hier -filter {NAME=~ thedesign/r_netlock_phy_locked*}] 7.0
+##
+##
+@PREFIX=netdbg
+@DEPENDS=ETH_ROUTER
+@SLAVE.BUS=wb32
+@NADDR=1
+@SLAVE.TYPE=SINGLE
+@MAIN.DEFNS=
+	reg	[$clog2(NETDEVS)-1:0]	@$(PREFIX)_netdbg;
+	reg	[31:0]	net_debug;
+	reg	[2*NETDEVS-1:0]		@$(PREFIX)_netleds;
+	// Verilator lint_off UNUSED
+	wire	[32*NETDEVS-1:0]	@$(PREFIX)_wide;
+	// Verilator lint_on  UNUSED
+@MAIN.INSERT=
+	assign	@$(SLAVE.PREFIX)_stall = 0;
+	always @(posedge i_clk)
+	if (i_reset)
+		@$(PREFIX)_netdbg <= 0;
+	else if (@$(SLAVE.PREFIX)_stb && @$(SLAVE.PREFIX)_we
+			&& (&@$(SLAVE.PREFIX)_sel[($clog2(NETDEVS)+7)/8-1:0]))
+		@$(PREFIX)_netdbg <= @$(SLAVE.PREFIX)_data[$clog2(NETDEVS)-1:0];
+
+	assign	@$(PREFIX)_wide = gnet_net_debug >> (32* @$(PREFIX)_netdbg);
+	always @(posedge i_clk)
+		net_debug <= @$(PREFIX)_wide[31:0];
+	always @(posedge i_clk)
+		@$(PREFIX)_netleds <= { o_gnet_activity, o_gnet_linkup };
+
+	assign	@$(SLAVE.PREFIX)_ack = @$(SLAVE.PREFIX)_stb;
+	assign	@$(SLAVE.PREFIX)_idata = { 8'h00,
+		{(8-NETDEVS){1'b0}}, @$(PREFIX)_netleds[NETDEVS +: NETDEVS],
+		{(8-NETDEVS){1'b0}}, @$(PREFIX)_netleds[0 +: NETDEVS],
+		{(8-$clog2(NETDEVS)){1'b0}}, @$(PREFIX)_netdbg };
+
+@REGS.N=1
+@REGS.0=0 R_NETDBG NETDBG
+@XDC.INSERT=
+## These first two timing exceptions are not necessary, since the signals
+## are coming from a coherent clock domain.
+## set_max_delay -datapath_only -from [get_cells -hier -filter {NAME=~thedesign/*o_gnet_activity*}] -to [get_cells -hier -filter {NAME=~thedesign/@$(PREFIX)_netleds*}] 8.0
+## set_max_delay -datapath_only -from [get_cells -hier -filter {NAME=~thedesign/*o_gnet_linkup*}] -to [get_cells -hier -filter {NAME=~thedesign/@$(PREFIX)_netleds*}] 8.0
+## The next one, however, is necesary.
+set_max_delay -datapath_only -from [get_cells -hier -filter {NAME=~ thedesign/GEN_ETHERNET_DECODE*u_netpath/tx_reset_n*}] -to [get_cells -hier -filter {NAME=~thedesign/@$(PREFIX)_netleds*}] 8.0
+set_max_delay -datapath_only -from [get_cells -hier -filter {NAME=~ thedesign/GEN_ETHERNET_DECODE*u_netpath/u_p642pkt/link_up_counter_r*}] -to [get_cells -hier -filter {NAME=~ thedesign/netdbg_netleds_r*}] 10.0

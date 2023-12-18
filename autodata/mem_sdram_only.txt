@@ -1,0 +1,79 @@
+################################################################################
+##
+## Filename: 	mem_sdram_only.txt
+## {{{
+## Project:	10Gb Ethernet switch
+##
+## Purpose:	Describes a memory model containing nothing more than SDRAM.
+##		This will be used to create an sdram.ld linker script that can
+##	be used to link ZipCPU programs.  In particular, this script is designed
+##	for ZipCPU programs that can be loaded from an SD-card image by simply
+##	copying the image to the beginning of the SDRAM.
+##
+##
+## Creator:	Dan Gisselquist, Ph.D.
+##		Gisselquist Technology, LLC
+##
+################################################################################
+## }}}
+## Copyright (C) 2023, Gisselquist Technology, LLC
+## {{{
+## This file is part of the ETH10G project.
+##
+## The ETH10G project contains free software and gateware, licensed under the
+## terms of the 3rd version of the GNU General Public License as published by
+## the Free Software Foundation.
+##
+## This project is distributed in the hope that it will be useful, but WITHOUT
+## ANY WARRANTY; without even the implied warranty of MERCHANTIBILITY or
+## FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+## for more details.
+##
+## You should have received a copy of the GNU General Public License along
+## with this program.  (It's in the $(ROOT)/doc directory.  Run make with no
+## target there if the PDF file isn't present.)  If not, see
+## <http://www.gnu.org/licenses/> for a copy.
+## }}}
+## License:	GPL, v3, as defined and found on www.gnu.org,
+## {{{
+##		http://www.gnu.org/licenses/gpl.html
+##
+################################################################################
+##
+## }}}
+@PREFIX=mem_sdram_only
+@MASTER.TYPE=SCRIPT
+@MASTER.BUS=wbwide
+@LD.FILE=sdram.ld
+@LD.DEFNS=
+/* LD.DEFNS from zipmaster.txt */
+_kram  = 0; /* No high-speed kernel RAM */
+_ram   = ORIGIN(streamram);
+_rom   = 0;
+_top_of_stack = ORIGIN(streamram) + LENGTH(streamram);
+
+@LD.SCRIPT=
+/* LD.SCRIPT from zipmaster.txt */
+SECTIONS
+{
+       .rocode ORIGIN(streamram) : ALIGN(4) {
+               _boot_address = .;
+               *(.start) *(.boot)
+               } > streamram
+       _kram_start = . ;
+       _kram_end = . ;
+       _ram_image_start = . ;
+       .kernel : ALIGN_WITH_INPUT {
+               *(.kernel)
+               *(.text.startup)
+               *(.text*)
+               *(.rodata*) *(.strings)
+               *(.data) *(COMMON)
+               }> streamram
+       _ram_image_end = . ;
+       .bss : ALIGN_WITH_INPUT {
+               *(.bss)
+               _bss_image_end = . ;
+               } > streamram
+       _top_of_heap = .;
+}

@@ -1,0 +1,454 @@
+################################################################################
+##
+## Filename: 	netrouter.txt
+## {{{
+## Project:	10Gb Ethernet switch
+##
+## Purpose:	
+##
+## Creator:	Dan Gisselquist, Ph.D.
+##		Gisselquist Technology, LLC
+##
+################################################################################
+## }}}
+## Copyright (C) 2023, Gisselquist Technology, LLC
+## {{{
+## This file is part of the ETH10G project.
+##
+## The ETH10G project contains free software and gateware, licensed under the
+## terms of the 3rd version of the GNU General Public License as published by
+## the Free Software Foundation.
+##
+## This project is distributed in the hope that it will be useful, but WITHOUT
+## ANY WARRANTY; without even the implied warranty of MERCHANTIBILITY or
+## FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+## for more details.
+##
+## You should have received a copy of the GNU General Public License along
+## with this program.  (It's in the $(ROOT)/doc directory.  Run make with no
+## target there if the PDF file isn't present.)  If not, see
+## <http://www.gnu.org/licenses/> for a copy.
+## }}}
+## License:	GPL, v3, as defined and found on www.gnu.org,
+## {{{
+##		http://www.gnu.org/licenses/gpl.html
+##
+################################################################################
+##
+## }}}
+@PREFIX=gnet
+@DEVID=ROUTER
+@ACCESS=ETH_ROUTER
+@$NDEV=4
+@SLAVE.BUS=wb32
+@SLAVE.TYPE=OTHER
+@SLAVE.ANSPREFIX=ctrl_
+@NADDR=64
+@MASTER.BUS=wbwide
+@MASTER.TYPE=dma
+@MASTER.ANSPREFIX=vfifo_
+@TOP.PORTLIST=
+			i_gnet_los, o_gnettx_disable,
+			o_gnet_linkup, o_gnet_activity,
+			o_gnet_p, o_gnet_n,
+			i_gnet_p, i_gnet_n,
+			i_clk_156mhz_p, i_clk_156mhz_n
+@TOP.IODECL=
+	// 10Gb Ethernet
+	input	wire	[@$(NDEV)-1:0]	i_gnet_los;
+	output	wire	[@$(NDEV)-1:0]	o_gnettx_disable;
+	output	wire	[@$(NDEV)-1:0]	o_gnet_linkup;
+	output	wire	[@$(NDEV)-1:0]	o_gnet_activity;
+	output	wire	[@$(NDEV)-1:0]	o_gnet_p, o_gnet_n;
+	input	wire	[@$(NDEV)-1:0]	i_gnet_p, i_gnet_n;
+	input	wire			i_clk_156mhz_p, i_clk_156mhz_n;
+@TOP.DEFNS=
+	// 10Gb Ethernet
+	wire	[@$(NDEV)-1:0]		gnet_rx_clk, gnet_tx_clk;
+	wire	[32*@$(NDEV)-1:0]	gnet_rx_data;
+	wire	[32*@$(NDEV)-1:0]	gnet_tx_data;
+	wire	[@$(NDEV)-1:0]		gnet_phy_fault;
+	wire	[@$(NDEV):0]		gnet_locked;
+@TOP.INSERT=
+	assign	o_gnettx_disable = -1;
+
+	xgtxphy #(
+		.NDEV(@$(NDEV))
+	) u_gnet_gtx_phy (
+		// {{{
+		.i_wb_clk(s_clk),
+		.o_phy_fault(gnet_phy_fault),
+		.o_lock_status(gnet_locked),
+		//
+		.S_CLK(  gnet_tx_clk),
+		.S_DATA( gnet_tx_data),
+		//
+		.M_CLK(  gnet_rx_clk),
+		.M_DATA( gnet_rx_data),
+		//
+		.i_refck_p(i_clk_156mhz_p), .i_refck_n(i_clk_156mhz_n),
+		.i_rx_p(i_gnet_p), .i_rx_n(i_gnet_n),
+		.o_tx_p(o_gnet_p), .o_tx_n(o_gnet_n)
+		// }}}
+	);
+@TOP.MAIN=
+		gnet_rx_clk, gnet_rx_data,
+		gnet_tx_clk, gnet_tx_data,
+		gnet_phy_fault, o_gnet_linkup, o_gnet_activity,
+		i_gnet_los, gnet_locked
+@MAIN.PARAM=
+	localparam	NETDEVS  = @$(NDEV);
+`ifdef	CPUNET_ACCESS
+	localparam	NETPORTS = @$(NDEV)+1;
+`else
+	localparam	NETPORTS = @$(NDEV);
+`endif
+@MAIN.PORTLIST=
+		i_@$(PREFIX)_rx_clk, i_@$(PREFIX)_rx_data,
+		i_@$(PREFIX)_tx_clk, o_@$(PREFIX)_tx_data,
+		i_@$(PREFIX)_phy_fault,o_@$(PREFIX)_linkup,o_@$(PREFIX)_activity,
+		i_@$(PREFIX)_los, i_@$(PREFIX)_phy_locked
+@MAIN.IODECL=
+	// 10Gb Ethernet
+	// {{{
+	input	wire	[NETDEVS-1:0]	i_@$(PREFIX)_rx_clk;
+	input	wire [32*NETDEVS-1:0]	i_@$(PREFIX)_rx_data;
+	input	wire	[NETDEVS-1:0]	i_@$(PREFIX)_tx_clk;
+	output	wire [32*NETDEVS-1:0]	o_@$(PREFIX)_tx_data;
+	input	wire	[NETDEVS-1:0]	i_@$(PREFIX)_phy_fault;
+	output	wire [NETDEVS-1:0]	o_@$(PREFIX)_linkup;
+	output	wire [NETDEVS-1:0]	o_@$(PREFIX)_activity;
+	// Verilator lint_off UNUSED
+	input	wire	[NETDEVS-1:0]	i_@$(PREFIX)_los;
+	input	wire	[NETDEVS:0]	i_@$(PREFIX)_phy_locked;
+	// Verilator lint_on  UNUSED
+	// }}}
+@MAIN.DEFNS=
+	// Incoming 10Gb packet signaling
+	// {{{
+	wire	[NETDEVS-1:0]		@$(PREFIX)_rx_valid,
+					@$(PREFIX)_rx_ready,
+					@$(PREFIX)_rx_last,
+					@$(PREFIX)_rx_abort;
+	wire	[128*NETDEVS-1:0]	@$(PREFIX)_rx_data;
+	wire	[4*NETDEVS-1:0]	@$(PREFIX)_rx_bytes;
+	// }}}
+	// Outoging 10Gb packet signaling
+	// {{{
+	wire	[NETDEVS-1:0]		@$(PREFIX)_tx_valid,
+					@$(PREFIX)_tx_ready,
+					@$(PREFIX)_tx_last,
+					@$(PREFIX)_tx_abort;
+	wire	[128*NETDEVS-1:0]	@$(PREFIX)_tx_data;
+	wire	[4*NETDEVS-1:0]	@$(PREFIX)_tx_bytes;
+	// }}}
+	genvar	g_@$(PREFIX);
+	// Verilator lint_off UNUSED
+	wire	[32*NETDEVS-1:0]	@$(PREFIX)_net_debug;
+	wire	[32-1:0]		@$(PREFIX)_route_debug;
+	// Verilator lint_on  UNUSED
+@GENDCD=GEN_ETHERNET_DECODE
+@MAIN.INSERT=
+	generate for(g_@$(PREFIX)=0; g_@$(PREFIX)<NETDEVS; g_@$(PREFIX)=g_@$(PREFIX)+1)
+	begin : @$(GENDCD)
+		netpath
+		u_netpath (
+			// {{{
+			.i_sys_clk(i_clk),
+			.i_fast_clk(i_clk200),
+			.i_reset_n(!i_reset),
+			.i_rx_clk(i_@$(PREFIX)_rx_clk[g_@$(PREFIX)]),
+			.i_tx_clk(i_@$(PREFIX)_tx_clk[g_@$(PREFIX)]),
+			.o_link_up(o_@$(PREFIX)_linkup[g_@$(PREFIX)]),
+			.o_activity(o_@$(PREFIX)_activity[g_@$(PREFIX)]),
+			// PHY interface
+			// {{{
+			.i_phy_fault(i_@$(PREFIX)_phy_fault[g_@$(PREFIX)]),
+			.i_raw_data(i_@$(PREFIX)_rx_data[32*g_@$(PREFIX)+:32]
+							^ 32'hffff_ffff),
+			//
+			.o_raw_data(o_@$(PREFIX)_tx_data[32*g_@$(PREFIX)+:32]),
+			// }}}
+			// Incoming (received) packet AXIN source
+			// {{{
+			.M_VALID(@$(PREFIX)_rx_valid[g_@$(PREFIX)]),
+			.M_READY(@$(PREFIX)_rx_ready[g_@$(PREFIX)]),
+			.M_DATA( @$(PREFIX)_rx_data[128*g_@$(PREFIX)+: 128]),
+			.M_BYTES(@$(PREFIX)_rx_bytes[4*g_@$(PREFIX)+: 4]),
+			.M_LAST( @$(PREFIX)_rx_last[g_@$(PREFIX)]),
+			.M_ABORT(@$(PREFIX)_rx_abort[g_@$(PREFIX)]),
+			// }}}
+			// Outgoing (transmit) packet AXIN sink
+			// {{{
+			.S_VALID(@$(PREFIX)_tx_valid[g_@$(PREFIX)]),
+			.S_READY(@$(PREFIX)_tx_ready[g_@$(PREFIX)]),
+			.S_DATA( @$(PREFIX)_tx_data[128*g_@$(PREFIX)+: 128]),
+			.S_BYTES(@$(PREFIX)_tx_bytes[4*g_@$(PREFIX)+: 4]),
+			.S_LAST( @$(PREFIX)_tx_last[g_@$(PREFIX)]),
+			.S_ABORT(@$(PREFIX)_tx_abort[g_@$(PREFIX)]),
+			// }}}
+			.o_debug(@$(PREFIX)_net_debug[32*g_@$(PREFIX) +: 32])
+			// }}}
+		);
+	end endgenerate
+
+	////////////////////////////////////////////////////////////////////////
+	//
+	// Instantiate the core of the router itself
+	// {{{
+
+	routecore #(
+		.NETH(NETPORTS),
+`ifdef	CPUNET_ACCESS
+		.OPT_CPUNET(1'b1),
+`else
+		.OPT_CPUNET(1'b0),
+`endif
+		.DEF_BASEADDR(0),
+		.DEF_MEMSIZE(0),
+		.BUSDW(@$(MASTER.BUS.WIDTH)),
+		.AW(@$(MASTER.BUS.AWID)),
+		.OPT_VFIFO(4'b1100)
+`ifdef	CPUNET_ACCESS
+		// This *should* work, but ... doesn't
+		, .OPT_NEVER({ 5'h10, 5'h08, 5'h04, 5'h1f, 5'h1f }),
+		.OPT_ALWAYS({ 5'h00, 5'h00, 5'h00, 5'h00, 5'h00 })
+//
+		// This should force a "right" answer
+		// , .OPT_NEVER({ 5'h10, 5'h1f, 5'h1f, 5'h1f, 5'h1f }),
+		// .OPT_ALWAYS({ 5'h00, 5'h04, 5'h08, 5'h00, 5'h00 })
+`endif
+	) u_router (
+		// {{{
+		.i_clk(i_clk), .i_reset(i_reset),
+`ifdef	NETRESET_ACCESS
+		.ETH_RESET(r_netreset),
+`else
+		.ETH_RESET({(NETPORTS){i_reset}}),
+`endif
+		// Incoming (RX) packet interface
+		// {{{
+`ifdef	CPUNET_ACCESS
+		.RX_VALID({ cpunet_tx_valid, @$(PREFIX)_rx_valid }),
+		.RX_READY({ cpunet_tx_ready, @$(PREFIX)_rx_ready }),
+		.RX_DATA({  cpunet_tx_data,  @$(PREFIX)_rx_data  }),
+		.RX_BYTES({ cpunet_tx_bytes, @$(PREFIX)_rx_bytes }),
+		.RX_LAST({  cpunet_tx_last,  @$(PREFIX)_rx_last  }),
+		.RX_ABORT({ cpunet_tx_abort, @$(PREFIX)_rx_abort }),
+`else
+		.RX_VALID(@$(PREFIX)_rx_valid),
+		.RX_READY(@$(PREFIX)_rx_ready),
+		.RX_DATA( @$(PREFIX)_rx_data),
+		.RX_BYTES(@$(PREFIX)_rx_bytes),
+		.RX_LAST( @$(PREFIX)_rx_last),
+		.RX_ABORT(@$(PREFIX)_rx_abort),
+`endif
+		// }}}
+		// VFIFO control interface
+		@$(SLAVE.ANSIPORTLIST),
+		// VFIFO memory interface
+		@$(MASTER.ANSIPORTLIST),
+		// Outgoing (TX) packet interface
+		// {{{
+`ifdef	CPUNET_ACCESS
+		.TX_VALID({ cpunet_rx_valid, @$(PREFIX)_tx_valid }),
+		.TX_READY({ cpunet_rx_ready, @$(PREFIX)_tx_ready }),
+		.TX_DATA({  cpunet_rx_data,  @$(PREFIX)_tx_data  }),
+		.TX_BYTES({ cpunet_rx_bytes, @$(PREFIX)_tx_bytes }),
+		.TX_LAST({  cpunet_rx_last,  @$(PREFIX)_tx_last  }),
+		.TX_ABORT({ cpunet_rx_abort, @$(PREFIX)_tx_abort }),
+`else
+		.TX_VALID(@$(PREFIX)_tx_valid),
+		.TX_READY(@$(PREFIX)_tx_ready),
+		.TX_DATA( @$(PREFIX)_tx_data),
+		.TX_BYTES(@$(PREFIX)_tx_bytes),
+		.TX_LAST( @$(PREFIX)_tx_last),
+		.TX_ABORT(@$(PREFIX)_tx_abort),
+`endif
+		// }}}
+		.o_debug(@$(PREFIX)_route_debug)
+		// }}}
+	);
+
+	// }}}
+@REGS.N=61
+@REGS.0=0   R_@$(DEVID) @$(DEVID)
+@REGS.1=0   R_@$(DEVID)0	@$(DEVID)0
+@REGS.2=1   R_@$(DEVID)SZ0	@$(DEVID)SZ0
+@REGS.3=2   R_@$(DEVID)WR0	@$(DEVID)WR0
+@REGS.4=3   R_@$(DEVID)RD0	@$(DEVID)RD0
+@REGS.5=4   R_@$(DEVID)1	@$(DEVID)1
+@REGS.6=5   R_@$(DEVID)SZ1	@$(DEVID)SZ1
+@REGS.7=6   R_@$(DEVID)WR1	@$(DEVID)WR1
+@REGS.8=7   R_@$(DEVID)RD1	@$(DEVID)RD1
+@REGS.9=8   R_@$(DEVID)2	@$(DEVID)2
+@REGS.10=9  R_@$(DEVID)SZ2	@$(DEVID)SZ2
+@REGS.11=10 R_@$(DEVID)WR2	@$(DEVID)WR2
+@REGS.12=11 R_@$(DEVID)RD2	@$(DEVID)RD2
+@REGS.13=12 R_@$(DEVID)3	@$(DEVID)3
+@REGS.14=13 R_@$(DEVID)SZ3	@$(DEVID)SZ3
+@REGS.15=14 R_@$(DEVID)WR3	@$(DEVID)WR3
+@REGS.16=15 R_@$(DEVID)RD3	@$(DEVID)RD3
+##
+@REGS.17=16 R_@$(DEVID)PK0	@$(DEVID)PK0
+@REGS.18=17 R_@$(DEVID)BY0	@$(DEVID)BY0
+@REGS.19=18 R_@$(DEVID)FP0	@$(DEVID)FP0
+@REGS.20=19 R_@$(DEVID)FB0	@$(DEVID)FB0
+@REGS.21=20 R_@$(DEVID)PK1	@$(DEVID)PK1
+@REGS.22=21 R_@$(DEVID)BY1	@$(DEVID)BY1
+@REGS.23=22 R_@$(DEVID)FP1	@$(DEVID)FP1
+@REGS.24=23 R_@$(DEVID)FB1	@$(DEVID)FB1
+@REGS.25=24 R_@$(DEVID)PK2	@$(DEVID)PK2
+@REGS.26=25 R_@$(DEVID)BY2	@$(DEVID)BY2
+@REGS.27=26 R_@$(DEVID)FP2	@$(DEVID)FP2
+@REGS.28=27 R_@$(DEVID)FB2	@$(DEVID)FB2
+@REGS.29=28 R_@$(DEVID)PK3	@$(DEVID)PK3
+@REGS.30=29 R_@$(DEVID)BY3	@$(DEVID)BY3
+@REGS.31=30 R_@$(DEVID)FP3	@$(DEVID)FP3
+@REGS.32=31 R_@$(DEVID)FB3	@$(DEVID)FB3
+##
+@REGS.33=32 R_@$(DEVID)NWH0	@$(DEVID)NWH0
+@REGS.34=33 R_@$(DEVID)NWL0	@$(DEVID)NWL0
+@REGS.35=34 R_@$(DEVID)LKH0	@$(DEVID)LKH0
+@REGS.36=35 R_@$(DEVID)LKL0	@$(DEVID)LKL0
+@REGS.37=36 R_@$(DEVID)NWH1	@$(DEVID)NWH1
+@REGS.38=37 R_@$(DEVID)NWL1	@$(DEVID)NWL1
+@REGS.39=38 R_@$(DEVID)LKH1	@$(DEVID)LKH1
+@REGS.40=39 R_@$(DEVID)LKL1	@$(DEVID)LKL1
+@REGS.41=40 R_@$(DEVID)NWH2	@$(DEVID)NWH2
+@REGS.42=41 R_@$(DEVID)NWL2	@$(DEVID)NWL2
+@REGS.43=42 R_@$(DEVID)LKH2	@$(DEVID)LKH2
+@REGS.44=43 R_@$(DEVID)LKL2	@$(DEVID)LKL2
+@REGS.45=44 R_@$(DEVID)NWH3	@$(DEVID)NWH3
+@REGS.46=45 R_@$(DEVID)NWL3	@$(DEVID)NWL3
+@REGS.47=46 R_@$(DEVID)LKH3	@$(DEVID)LKH3
+@REGS.48=47 R_@$(DEVID)LKL3	@$(DEVID)LKL3
+@REGS.49=48 R_@$(DEVID)NWH4	@$(DEVID)NWH4
+@REGS.50=49 R_@$(DEVID)NWL4	@$(DEVID)NWL4
+@REGS.51=50 R_@$(DEVID)LKH4	@$(DEVID)LKH4
+@REGS.52=51 R_@$(DEVID)LKL4	@$(DEVID)LKL4
+@REGS.53=52 R_@$(DEVID)DBG0	@$(DEVID)DBG0
+@REGS.54=53 R_@$(DEVID)DBG1	@$(DEVID)DBG1
+@REGS.55=54 R_@$(DEVID)DBG2	@$(DEVID)DBG2
+@REGS.56=55 R_@$(DEVID)DBG3	@$(DEVID)DBG3
+@REGS.57=56 R_@$(DEVID)DBG4	@$(DEVID)DBG4
+@REGS.58=58 R_@$(DEVID)NEVER	@$(DEVID)NV		RTNEVER
+@REGS.59=59 R_@$(DEVID)ALWAYS	@$(DEVID)AL		RTALWAYS
+@REGS.60=63 R_@$(DEVID)DBGS	@$(DEVID)DBGS
+@BDEF.DEFN=
+
+typedef	struct	PKTVFIFO_S {
+	char		*v_base;
+	unsigned	v_memsize;
+	volatile char	*v_wrptr, *v_rdptr;
+} PKTVFIFO;
+
+typedef	struct	PKTVFIFODBG_S {
+	volatile unsigned	vdbg_pktcount, vdbg_bytecount,
+				vdbg_fifopkts, vdbg_fifobytes;
+} PKTVFIFODBG;
+
+typedef	struct	ROUTETBLDBG_S {
+	volatile unsigned	vtbl_lookup[2];
+	volatile unsigned	vtbl_request[2];
+} ROUTETBLDBG;
+
+struct	@$(DEVID)_S {
+	PKTVFIFO	vfif[@$(NDEV)];
+	PKTVFIFODBG	vdbg[@$(NDEV)];
+	ROUTETBLDBG	vtbl[@$(NDEV)+1];
+	unsigned	v_adhoc_debug[5];
+	unsigned	v_unused_align;
+	unsigned	v_never, v_always;
+	unsigned	v_unused[3];
+	unsigned	v_debug_select;
+};
+
+@BDEF.IONAME=	_@$(PREFIX)
+@BDEF.IOTYPE=	struct @$(DEVID)_S
+@BDEF.OSVAL=	static @$(BDEF.IOTYPE) *const @$(BDEF.IONAME) = ((@$(BDEF.IOTYPE) *)@$[0x%08x](REGBASE));
+@XDC.INSERT=
+## {{{
+create_clock -period 3.2 -name TXNETCK -waveform { 0 1.6 } -add [get_nets -filter {NAME=~gnet_tx_clk*}]
+create_clock -period 3.2 -name RXNETCK0 -waveform { 0 1.6 } -add [get_nets gnet_rx_clk[0]]
+create_clock -period 3.2 -name RXNETCK1 -waveform { 0 1.6 } -add [get_nets gnet_rx_clk[1]]
+create_clock -period 3.2 -name RXNETCK2 -waveform { 0 1.6 } -add [get_nets gnet_rx_clk[2]]
+create_clock -period 3.2 -name RXNETCK3 -waveform { 0 1.6 } -add [get_nets gnet_rx_clk[3]]
+##
+##
+set_max_delay -datapath_only -from [get_cells -hier -filter {NAME=~ pipe_reset*}] -to [get_cells -hier -filter {NAME=~ thedesign/@$(GENDCD)*.u_netpath/rx_reset*}] 5.0
+set_max_delay -datapath_only -from [get_cells -hier -filter {NAME=~ pipe_reset*}] -to [get_cells -hier -filter {NAME=~ thedesign/@$(GENDCD)*.u_netpath/tx_reset*}] 5.0
+set_max_delay -datapath_only -from [get_cells -hier -filter {NAME=~ u_gnet_gtx_phy/gtx_reset*}] -to [get_cells -hier -filter {NAME=~ u_gnet_gtx_phy/GEN_GTX*.r_phy_fault*}] 3.2
+set_max_delay -datapath_only -from [get_cells -hier -filter {NAME=~ u_gnet_gtx_phy/gtx_reset*}] -to [get_cells -hier -filter {NAME=~ u_gnet_gtx_phy/GEN_GTX*.rx_fault_pipe*}] 3.2
+set_max_delay -datapath_only -from [get_cells -hier -filter {NAME=~ u_gnet_gtx_phy/GEN_GTX*.r_phy_fault*}] -to [get_cells -hier -filter {NAME=~ thedesign/@$(GENDCD)*u_netpath/u_p642pkt/r_fault_pipe*}] 3.2
+set_max_delay -datapath_only -from [get_cells -hier -filter {NAME=~ u_gnet_gtx_phy/GEN_GTX*.r_phy_fault*}] -to [get_cells -hier -filter {NAME=~ thedesign/@$(GENDCD)*u_netpath/u_gendebug/phy_fault_pipe*}] 3.2
+##
+##
+set_max_delay -datapath_only -from [get_cells -hier -filter {NAME=~ thedesign/@$(GENDCD)*u_netpath/u_rxcdc/u_afifo/wgray_r*}] -to [get_cells -hier -filter {NAME=~ thedesign/@$(GENDCD)*u_netpath/u_rxcdc/u_afifo/wgray_cross*}] 5.0
+##
+##
+##
+set_max_delay -datapath_only -from [get_cells -hier -filter {NAME=~ thedesign/@$(GENDCD)*u_netpath/u_rxcdc/u_afifo/rgray_r*}] -to [get_cells -hier -filter {NAME=~ thedesign/@$(GENDCD)*u_netpath/u_rxcdc/u_afifo/rgray_cross*}] 5.0
+set_max_delay -datapath_only -from [get_cells -hier -filter {NAME=~ thedesign/@$(GENDCD)*u_netpath/rx_reset_n*}] -to [get_cells -hier -filter {NAME=~ thedesign/@$(GENDCD)*u_netpath/u_rxcdc/u_afifo/wr_addr*}] 5.0
+set_max_delay -datapath_only -from [get_cells -hier -filter {NAME=~ thedesign/@$(GENDCD)*u_netpath/rx_reset_n*}] -to [get_cells -hier -filter {NAME=~ thedesign/@$(GENDCD)*u_netpath/u_rxcdc/u_afifo/wgray*}] 5.0
+set_max_delay -datapath_only -from [get_cells -hier -filter {NAME=~ thedesign/@$(GENDCD)*u_netpath/rx_reset_n*}] -to [get_cells -hier -filter {NAME=~ thedesign/@$(GENDCD)*u_netpath/u_p642pkt/link_up_counter*}] 5.0
+set_max_delay -datapath_only -from [get_cells -hier -filter {NAME=~ thedesign/@$(GENDCD)*u_netpath/rx_reset_n*}] -to [get_cells -hier -filter {NAME=~ thedesign/@$(GENDCD)*u_netpath/u_pkt2p64b/r_remote_fault_pipe*}] 5.0
+set_max_delay -datapath_only -from [get_cells -hier -filter {NAME=~ thedesign/@$(GENDCD)*u_netpath/rx_reset_n*}] -to [get_cells -hier -filter {NAME=~ thedesign/@$(GENDCD)*u_netpath/u_pkt2p64b/r_local_fault_pipe*}] 5.0
+set_max_delay -datapath_only -from [get_cells -hier -filter {NAME=~ thedesign/@$(GENDCD)*u_netpath/rx_reset_n*}] -to [get_cells -hier -filter {NAME=~ thedesign/@$(GENDCD)*u_netpath/u_p642pkt/dly_data*}] 5.0
+set_max_delay -datapath_only -from [get_cells -hier -filter {NAME=~ thedesign/@$(GENDCD)*u_netpath/rx_afifo/rgray_r*}] -to [get_cells -hier -filter {NAME=~ thedesign/@$(GENDCD)*u_netpath/rx_afifo/rgray_cross*}] 3.0
+set_max_delay -datapath_only -from [get_cells -hier -filter {NAME=~ thedesign/@$(GENDCD)*u_netpath/rx_afifo/wgray_r*}] -to [get_cells -hier -filter {NAME=~ thedesign/@$(GENDCD)*u_netpath/rx_afifo/wgray_cross*}] 3.0
+##
+##
+set_max_delay -datapath_only -from [get_cells -hier -filter {NAME=~ thedesign/@$(GENDCD)*u_netpath/u_stat_afifo/rgray_r*}] -to [get_cells -hier -filter {NAME=~ thedesign/@$(GENDCD)*u_netpath/u_stat_afifo/rgray_cross*}] 5.0
+set_max_delay -datapath_only -from [get_cells -hier -filter {NAME=~ thedesign/@$(GENDCD)*u_netpath/u_stat_afifo/wgray_r*}] -to [get_cells -hier -filter {NAME=~ thedesign/@$(GENDCD)*u_netpath/u_stat_afifo/wgray_cross*}] 5.0
+set_max_delay -datapath_only -from [get_cells -hier -filter {NAME=~ thedesign/@$(GENDCD)*u_netpath/u_stat_afifo/mem*}] -to [get_cells -hier -filter {NAME=~ thedesign/@$(GENDCD)*u_netpath/o_debug*}] 8.0
+set_max_delay -datapath_only -from [get_cells -hier -filter {NAME=~ thedesign/@$(GENDCD)*u_netpath/u_txcdc/u_afifo/wgray*}] -to [get_cells -hier -filter {NAME=~ thedesign/@$(GENDCD)*u_netpath/u_txcdc/u_afifo/wgray_cros*}] 10.0
+set_max_delay -datapath_only -from [get_cells -hier -filter {NAME=~ thedesign/@$(GENDCD)*u_netpath/u_txcdc/u_afifo/rgray*}] -to [get_cells -hier -filter {NAME=~ thedesign/@$(GENDCD)*u_netpath/u_txcdc/u_afifo/rgray_cros*}] 10.0
+##
+##
+set_max_delay -datapath_only -from [get_cells -hier -filter {NAME=~ thedesign/@$(GENDCD)*u_netpath/tx_afifo/rgray_r*}] -to [get_cells -hier -filter {NAME=~ thedesign/@$(GENDCD)*u_netpath/tx_afifo/rgray_cross*}] 3.0
+set_max_delay -datapath_only -from [get_cells -hier -filter {NAME=~ thedesign/@$(GENDCD)*u_netpath/tx_afifo/wgray_r*}] -to [get_cells -hier -filter {NAME=~ thedesign/@$(GENDCD)*u_netpath/tx_afifo/wgray_cross*}] 3.0
+set_max_delay -datapath_only -from [get_cells -hier -filter {NAME=~ thedesign/@$(GENDCD)*u_netpath/tx_reset_n*}] -to [get_cells -hier -filter {NAME=~ thedesign/@$(GENDCD)*u_netpath/u_pktgate/wr_addr*}] 3.0
+set_max_delay -datapath_only -from [get_cells -hier -filter {NAME=~ thedesign/@$(GENDCD)*u_netpath/tx_reset_n*}] -to [get_cells -hier -filter {NAME=~ thedesign/@$(GENDCD)*u_netpath/tx_afifo/rd_addr*}] 3.0
+set_max_delay -datapath_only -from [get_cells -hier -filter {NAME=~ thedesign/@$(GENDCD)*u_netpath/tx_reset_n*}] -to [get_cells -hier -filter {NAME=~ thedesign/@$(GENDCD)*u_netpath/tx_afifo/rgray_r*}] 3.0
+set_max_delay -datapath_only -from [get_cells -hier -filter {NAME=~ thedesign/@$(GENDCD)*u_netpath/tx_reset_n*}] -to [get_cells -hier -filter {NAME=~ thedesign/@$(GENDCD)*u_netpath/tx_afifo/rd_wgray_r*}] 3.0
+## }}}
+@RTL.MAKE.GROUP=NET
+@RTL.MAKE.SUBD=net
+@RTL.MAKE.FILES= axinbroadcast.v axincdc.v axinwidth.v crc_axin.v dropshort.v
+	netpath.v netskid.v p642pkt.v p64bscrambler.v pkt2p64b.v pktgate.v
+	xgtxphy.v
+@SIM.CLOCK=clk
+@SIM.TICK=
+		m_core->i_@$(PREFIX)_phy_fault= 0;
+######################################
+@PREFIX=netreset
+@DEVID=NETRESET
+@ACCESS=@$(DEVID)_ACCESS
+@DEPENDS=ETH_ROUTER
+@SLAVE.BUS=wb32
+@SLAVE.TYPE=SINGLE
+@NADDR=1
+@MAIN.DEFNS=
+	reg	[NETPORTS-1:0]	r_@$(PREFIX);
+@MAIN.INSERT=
+	initial	r_@$(PREFIX)=0;
+	always @(posedge @$(SLAVE.BUS.CLOCK.WIRE))
+	if (@$(SLAVE.BUS.CLOCK.RESET))
+		r_@$(PREFIX) <= 0;
+	else if (@$(SLAVE.PREFIX)_stb && @$(SLAVE.PREFIX)_we
+			&& (@$(SLAVE.PREFIX)_sel[0]))
+		r_@$(PREFIX) <= @$(SLAVE.PREFIX)_data[NETPORTS-1:0];
+
+	assign	@$(SLAVE.PREFIX)_stall=1'b0;
+	assign	@$(SLAVE.PREFIX)_ack=@$(SLAVE.PREFIX)_stb;
+	assign	@$(SLAVE.PREFIX)_idata={ {(32-NETPORTS){1'b0}}, r_@$(PREFIX) };
+@MAIN.ALT=
+	initial	r_@$(PREFIX)=0;
+	always @(*)
+		r_@$(PREFIX) = {(NETPORTS){i_reset)};
+@REGS.N=1
+@REGS.0=0 R_@$(DEVID) @$(DEVID)
+@BDEF.IONAME=	_@$(PREFIX)
+@BDEF.IOTYPE=	unsigned
+@BDEF.OSVAL=	static volatile @$(BDEF.IOTYPE) *const @$(BDEF.IONAME) = ((@$(BDEF.IOTYPE) *)@$[0x%08x](REGBASE));

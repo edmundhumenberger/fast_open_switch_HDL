@@ -1,0 +1,77 @@
+################################################################################
+##
+## Filename: 	mem_full.txt
+## {{{
+## Project:	10Gb Ethernet switch
+##
+## Purpose:	Describes a memory model containing 1) flash RAM for booting,
+##		2) block RAM for high-speed (Kernel) operations, and 3) DDR3
+##	SDRAM for everything else.  This will be used to create a board.ld
+##	linker script that can be used to link ZipCPU programs.
+##
+##
+## Creator:	Dan Gisselquist, Ph.D.
+##		Gisselquist Technology, LLC
+##
+################################################################################
+## }}}
+## Copyright (C) 2023, Gisselquist Technology, LLC
+## {{{
+## This file is part of the ETH10G project.
+##
+## The ETH10G project contains free software and gateware, licensed under the
+## terms of the 3rd version of the GNU General Public License as published by
+## the Free Software Foundation.
+##
+## This project is distributed in the hope that it will be useful, but WITHOUT
+## ANY WARRANTY; without even the implied warranty of MERCHANTIBILITY or
+## FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+## for more details.
+##
+## You should have received a copy of the GNU General Public License along
+## with this program.  (It's in the $(ROOT)/doc directory.  Run make with no
+## target there if the PDF file isn't present.)  If not, see
+## <http://www.gnu.org/licenses/> for a copy.
+## }}}
+## License:	GPL, v3, as defined and found on www.gnu.org,
+## {{{
+##		http://www.gnu.org/licenses/gpl.html
+##
+################################################################################
+##
+## }}}
+@PREFIX=mem_full
+@MASTER.TYPE=SCRIPT
+@MASTER.BUS=wbwide
+@LD.FILE=board.ld
+@LD.DEFNS=
+/* LD.DEFNS from @$(PREFIX) */
+_kram  = 0; /* No high-speed kernel RAM */
+_ram   = ORIGIN(bkram);
+_rom   = 0;	/* Should be ORIGIN(flash); */
+_top_of_stack = ORIGIN(bkram) + LENGTH(bkram);
+
+@LD.SCRIPT=
+/* LD.SCRIPT from @$(PREFIX) */
+SECTIONS
+{
+       .ramcode ORIGIN(sdram) : ALIGN(4) {
+               _boot_address = .;
+               _kram_start = .;
+               _kram_end = .;
+       		_ram_image_start = . ;
+               *(.start) *(.boot)
+               *(.kernel)
+               *(.text.startup)
+               *(.text*)
+               *(.rodata*) *(.strings)
+               *(.data) *(COMMON)
+               }> sdram
+       _ram_image_end = . ;
+       .bss : ALIGN_WITH_INPUT {
+               *(.bss)
+               _bss_image_end = . ;
+               } > sdram
+       _top_of_heap = .;
+}
+#
